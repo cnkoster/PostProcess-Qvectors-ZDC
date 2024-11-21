@@ -1,0 +1,12 @@
+executable              = runStbcJob1.sh
+arguments               = "$(Process) $(PARAM1) $(PARAM2)"
+log                     = log/test.log
+output                  = log/outfile.txt
+error                   = log/errors.txt
++UseOS                  = "el9"
++JobCategory            = "short"
+
+request_cpus            = 1
+request_memory          = 2G
+
+queue 101
