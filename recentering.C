@@ -23,6 +23,11 @@
 
 #endif
 
+double Psi(double y, double x){ 
+    return 1.0 * TMath::ATan2(y, x);
+}
+int bins=0; 
+
 template <typename T>
 void writeTList(int iter, int step, int RUN, std::vector<T*> hists, const char* filename = "Calibration_constants", bool makelist = true, const char* mode="RECREATE"){
 
@@ -55,7 +60,7 @@ if(makelist) {
 }
 
 template <typename T>
-std::vector<double> getCorrection(int runnumber, float centrality, float v1, float v2, float v3, T* hist)
+std::vector<double> getCorrection( float centrality, float v1, float v2, float v3, T* hist)
 {
 double calibConstant = 0; 
 std::vector<double> calib = {0,0};
@@ -76,22 +81,23 @@ if (auto* h1d = dynamic_cast<TProfile*>(hist)) {
 
 } else if (auto* hn = dynamic_cast<THnSparseD*>(hist)) {
     std::vector<int> sparsePars(5);
-    sparsePars[0]=hn->GetAxis(0)->FindBin(runnumber);
-    sparsePars[1]=hn->GetAxis(1)->FindBin(centrality);
-    sparsePars[2]=hn->GetAxis(2)->FindBin(v1);
-    sparsePars[3]=hn->GetAxis(3)->FindBin(v2);
-    sparsePars[4]=hn->GetAxis(4)->FindBin(v3);
+    // sparsePars[0]=hn->GetAxis(0)->FindBin(runnumber);
+    sparsePars[0]=hn->GetAxis(0)->FindBin(centrality);
+    sparsePars[1]=hn->GetAxis(1)->FindBin(v1);
+    sparsePars[2]=hn->GetAxis(2)->FindBin(v2);
+    sparsePars[3]=hn->GetAxis(3)->FindBin(v3);
     for (int i = 0; i < sparsePars.size(); i++) {
     hn->GetAxis(i)->SetRange(sparsePars[i], sparsePars[i]);
     }
     TH1::AddDirectory(kFALSE);
-    TH1D* proj = hn->Projection(5);//, uniqueProjName);
+    TH1D* proj = hn->Projection(4);//, uniqueProjName);
     if(proj){
       calib[0] = proj->GetMean();
       calib[1] = proj->GetStdDev(); 
-      if(proj->GetEntries()<2){
-        printf("1 entry in sparse bin! Not used... (increase binsize) \n");
+      if(proj->GetEntries()<20){
+        // std::cout<<bins<<" "; 
         calib = {0,0}; 
+        bins++; 
       }
     }
     delete proj;
@@ -101,7 +107,7 @@ return calib;
 }
 
 //
-int do_recentering (TString inputfilename = "/dcache/alice/nkoster/PhD/q-vectors/LHC23zzh_pass4_small/step0/544122/AO2D.root", int RUN = 544122, int npart = 100, int part=0)
+int do_recentering (TString inputfilename = "/dcache/alice/nkoster/PhD/q-vectors/LHC23zzh_pass4_small/step0/544122/AO2D.root", int RUN = 544122, int npart = 100, int part=0, int fineBins = 50)
 {
   TFile *fin = TFile::Open(inputfilename.Data(),"READ");
   if(!fin) {
@@ -144,6 +150,7 @@ const char* df_name = df->GetName();
   std::vector<TProfile*> histVx;
   std::vector<TProfile*> histVy;
   std::vector<TProfile*> histVz;
+  std::vector<TH2D*> histsSP; // for each step A,C
 
   std::vector<std::vector<TProfile*>> corrHist(6,std::vector<TProfile*>()); 
   std::vector<std::vector<TProfile*>> corrHist1D(4,std::vector<TProfile*>()); 
@@ -152,21 +159,34 @@ const char* df_name = df->GetName();
 
   // Define axes parameters
   int binsVwide = 4;
-  int binsVfine = 100; 
+  int binsVfine = fineBins; 
+  int binsCentfine = 90;
 
 
-  double vx_max = tree->GetMaximum("fVx");
-  double vx_min = tree->GetMinimum("fVx");
+  double vx_max = 0.01; //tree->GetMaximum("fVx");
+  double vx_min = -0.01; //tree->GetMinimum("fVx");
 
-  double vy_max = tree->GetMaximum("fVy");
-  double vy_min = tree->GetMinimum("fVy");
+  double vy_max = 0.01; //tree->GetMaximum("fVy");
+  double vy_min = -0.01; //tree->GetMinimum("fVy");
 
   double vz_max = 10;
   double vz_min = -10;  
 
-  int nBins[] = {static_cast<int>(1e6), 4, binsVwide, binsVwide, binsVwide, 100}; // Number of bins for each axis
-  double minVals[] = {0, 0, vx_min, vy_min, vz_min, -2};    // Minimum values for each axis
-  double maxVals[] = {1e6, 90, vx_max, vy_max, vz_max, 2};     // Maximum values for each axis
+  int nBins[] = {4, binsVwide, binsVwide, binsVwide, 100}; // Number of bins for each axis
+  double minVals[] = {0, vx_min, vy_min, vz_min, -2};    // Minimum values for each axis
+  double maxVals[] = {90, vx_max, vy_max, vz_max, 2};     // Maximum values for each axis
+
+  TH2D* SPplaneA = new TH2D("SPplaneA", "SPplaneA; #Psi^{A}; Centrality(%)", 100, -3.15, 3.15, 90, 0, 90); 
+  TH2D* SPplaneA_C = new TH2D("SPplaneA_C", "SPplaneA_C; #Psi^{A}-#Psi^{C}; Centrality(%)", 100, -3.15, 3.15, 90, 0, 90); 
+  TH2D* SPplaneC = new TH2D("SPplaneC", "SPplaneC; #Psi^{C}; Centrality(%)", 100, -3.15, 3.15, 90, 0, 90); 
+  TH2D* SPplaneAC = new TH2D("SPplaneAC", "SPplaneAC; #Psi^{}; Centrality(%)", 100, -3.15, 3.15, 100, -3.15, 3.15); 
+  TProfile* hCosdPhi = new TProfile("hCosdPhi", "hCosdPhi; Centrality(%); #LT Cos( #Psi^{A}-#Psi^{C})#GT", 90,0,90); 
+  TProfile* hSindPhi = new TProfile("hSindPhi", "hSindPhi; Centrality(%); #LT Sin( #Psi^{A}-#Psi^{C})#GT", 90,0,90); 
+  TH1D* hCentrality = new TH1D("hCentrality", "hCentrality; Centrality(%); Entries", 90,0,90); 
+  TH1D* hVx = new TH1D("hVx", "hVx; Vx(cm); Entries", 100, -0.01, 0.01); 
+  TH1D* hVy = new TH1D("hVy", "hVy; Vy(cm); Entries", 100, -0.01, 0.01); 
+  TH1D* hVz = new TH1D("hVz", "hVz; Vz(cm); Entries", 100, -10, 10); 
+
 
   for (int step = 0; step < 6; step++) {
     for (const char* side : sides) {
@@ -174,7 +194,7 @@ const char* df_name = df->GetName();
         if (step == 1) {
           TString name = TString::Format("hQ%s%s_mean_Cent_V_run", coord, side);
           // Correct THnSparseD creation by passing array of axes
-          THnSparseD* hist = new THnSparseD(name.Data(), name.Data(), 6, nBins, minVals, maxVals);
+          THnSparseD* hist = new THnSparseD(name.Data(), name.Data(), 5, nBins, minVals, maxVals);
           hist4D.push_back(hist); 
           names[step - 1].push_back(name);
 
@@ -189,13 +209,13 @@ const char* df_name = df->GetName();
         TProfile* hist_vz = new TProfile(name_vz.Data(), name_vz.Data(), binsVfine, -10, 10);
         corrHist1D[2].push_back(hist_vz);
         TString name_cent = TString::Format("hQ%s%s_vs_cent", coord, side);
-        TProfile* hist_cent = new TProfile(name_cent.Data(), name_cent.Data(), binsVfine, 0, 80);
+        TProfile* hist_cent = new TProfile(name_cent.Data(), name_cent.Data(), binsCentfine, 0, 90);
         corrHist1D[3].push_back(hist_cent);
         }
         if (step == 2) {
           TString name = TString::Format("hQ%s%s_mean_cent_run", coord, side);
           // Correct TProfile2D constructor
-          TProfile* hist = new TProfile(name.Data(), name.Data(), binsVfine, 0, 90);
+          TProfile* hist = new TProfile(name.Data(), name.Data(), binsCentfine, 0, 90);
           hist->GetXaxis()->SetTitle("Centrality (%)");
           names[step - 1].push_back(name);
           histCent.push_back(hist); 
@@ -256,6 +276,7 @@ const char* df_name = df->GetName();
     float qyC; 
     int   iteration; 
     int   step; 
+    bool  isSelected; 
       
     tree->SetBranchAddress("fRunnumber", &runnumber);
     tree->SetBranchAddress("fCent", &cent);
@@ -263,11 +284,12 @@ const char* df_name = df->GetName();
     tree->SetBranchAddress("fVy", &vy);
     tree->SetBranchAddress("fVz", &vz);
     tree->SetBranchAddress("fQXA", &qxA);
-    tree->SetBranchAddress("fQXC", &qyA);
-    tree->SetBranchAddress("fQYA", &qxC);
+    tree->SetBranchAddress("fQXC", &qxC);
+    tree->SetBranchAddress("fQYA", &qyA);
     tree->SetBranchAddress("fQYC", &qyC);
     tree->SetBranchAddress("fIteration", &iteration);
     tree->SetBranchAddress("fStep", &step);
+    tree->SetBranchAddress("fIsSelected", &isSelected);
 
     int it_out = 0; 
 
@@ -277,14 +299,17 @@ const char* df_name = df->GetName();
     // fill calibration thnsparse 
     if(iev==0) it_out = iteration; 
 
-    // if(vx>vx_max || vx<vx_min || vy>vy_max || vy<vy_min || vz>vz_max || vz<vz_min){
-    //   continue;
-    // }
+    // Remove outliers of vx and vy
+    // if(TMath::Abs(vx) > 0.01 || TMath::Abs(vx) > 0.01 ) isSelected = false; 
 
-    hist4D[0]->Fill(runnumber, cent, vx, vy, vz, qxA); 
-    hist4D[1]->Fill(runnumber, cent, vx, vy, vz, qyA); 
-    hist4D[2]->Fill(runnumber, cent, vx, vy, vz, qxC); 
-    hist4D[3]->Fill(runnumber, cent, vx, vy, vz, qyC); 
+    if(!isSelected) continue; 
+    // std::cout<<cent<<std::endl; 
+    // std::cout<<vx<<std::endl; 
+    
+    hist4D[0]->Fill(cent, vx, vy, vz, qxA); 
+    hist4D[1]->Fill(cent, vx, vy, vz, qyA); 
+    hist4D[2]->Fill(cent, vx, vy, vz, qxC); 
+    hist4D[3]->Fill(cent, vx, vy, vz, qyC); 
 
     corrHist[0][0]->Fill(cent, qxA*qxC); 
     corrHist[0][1]->Fill(cent, qxA*qyC); 
@@ -310,7 +335,25 @@ const char* df_name = df->GetName();
     corrHist1D[3][1]->Fill(cent, qyA);
     corrHist1D[3][2]->Fill(cent, qxC);
     corrHist1D[3][3]->Fill(cent, qyC);
+
+    SPplaneA->Fill(Psi(qyA,qxA),cent,1);
+    SPplaneC->Fill(Psi(qyC,qxC),cent,1);
+    SPplaneA_C->Fill(0.5*(Psi(qyA,qxA)+Psi(qyC,qxC)),cent,1);
+    SPplaneAC->Fill(Psi(qyA,qxA),Psi(qyC,qxC),1);
+    hCosdPhi->Fill(cent,TMath::Cos(Psi(qyA,qxA) - Psi(qyC,qxC)));
+    hSindPhi->Fill(cent,TMath::Sin(Psi(qyA,qxA) - Psi(qyC,qxC)));
+
+    //QA plots
+    hCentrality->Fill(cent);
+    hVx->Fill(vx); 
+    hVy->Fill(vy); 
+    hVz->Fill(vz); 
     }
+
+    std::vector<TH2D*> SPplane = {SPplaneA, SPplaneC, SPplaneAC, SPplaneA_C};
+    std::vector<TProfile*> dPlane = {hCosdPhi, hSindPhi};
+    std::vector<TH1D*> hOneDim = {hCentrality, hVx, hVy, hVz}; 
+
     writeTList(it_out+1, 1, RUN, hist4D); 
     
     writeTList(it_out+1, 0, RUN, corrHist[0], "outCorrelations", false); 
@@ -319,6 +362,10 @@ const char* df_name = df->GetName();
     writeTList(it_out+1, 0, RUN, corrHist1D[1], "outCorrParams", false, "UPDATE"); 
     writeTList(it_out+1, 0, RUN, corrHist1D[2], "outCorrParams", false, "UPDATE"); 
     writeTList(it_out+1, 0, RUN, corrHist1D[3], "outCorrParams", false, "UPDATE"); 
+    writeTList(it_out+1, 0, RUN, SPplane, "outCorrParams", false, "UPDATE");  
+    writeTList(it_out+1, 0, RUN, dPlane, "outCorrParams", false, "UPDATE");  
+    writeTList(it_out+1, 0, RUN, hOneDim, "outCorrParams", false, "UPDATE");  
+
     // - - - - - -  - - - - - -  - - - - - -  - - - - - -  - - - - - -  - - - - - -  - - - - - -  - - - - - - 
     printf("calib 1 created \n");
 
@@ -392,9 +439,14 @@ const char* df_name = df->GetName();
 
     newTree->SetBranchAddress("fIteration", &iteration_new); 
     newTree->SetBranchAddress("fQXA", &qxA5);
-    newTree->SetBranchAddress("fQXC", &qyA5);
-    newTree->SetBranchAddress("fQYA", &qxC5);
+    newTree->SetBranchAddress("fQXC", &qxC5);
+    newTree->SetBranchAddress("fQYA", &qyA5);
     newTree->SetBranchAddress("fQYC", &qyC5);
+
+    if(npart == 1) {
+      std::cout<<"npart is 1, we return!"<<std::endl; 
+      return 0; 
+    }
 
     int start = (nentries/npart)*part; 
     int end = ((nentries/npart)*(part+1) > nentries)? nentries : (nentries/npart)*(part+1); 
@@ -432,15 +484,15 @@ const char* df_name = df->GetName();
       if(in[0]){
         if (iev == 0) std::cout <<  " in 1 is true " << std::endl;
 
-        double corrqxA1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[0])[0];
-        double corrqyA1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[1])[0];
-        double corrqxC1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[2])[0];
-        double corrqyC1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[3])[0];
+        double corrqxA1 = getCorrection(cent, vx, vy, vz, hists1[0])[0];
+        double corrqyA1 = getCorrection(cent, vx, vy, vz, hists1[1])[0];
+        double corrqxC1 = getCorrection(cent, vx, vy, vz, hists1[2])[0];
+        double corrqyC1 = getCorrection(cent, vx, vy, vz, hists1[3])[0];
 
-        double WcorrqxA1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[0])[1];
-        double WcorrqyA1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[1])[1];
-        double WcorrqxC1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[2])[1];
-        double WcorrqyC1 = getCorrection(runnumber, cent, vx, vy, vz, hists1[3])[1];
+        double WcorrqxA1 = getCorrection(cent, vx, vy, vz, hists1[0])[1];
+        double WcorrqyA1 = getCorrection(cent, vx, vy, vz, hists1[1])[1];
+        double WcorrqxC1 = getCorrection(cent, vx, vy, vz, hists1[2])[1];
+        double WcorrqyC1 = getCorrection(cent, vx, vy, vz, hists1[3])[1];
 
         // std::cout<<"Correction is:"<<corrqxA1<<" "<<corrqyA1<<" "<<corrqxC1<<" "<<corrqyC1<<" "<<std::endl;
 
@@ -450,7 +502,7 @@ const char* df_name = df->GetName();
         double qyC1 = qyC - corrqyC1; 
 
 
-        if(!in[1]){
+        if(!in[1] && isSelected){
         histCent[0]->Fill(cent, qxA1, 1);//wcorrqxA1); 
         histCent[1]->Fill(cent, qyA1, 1);//wcorrqyA1); 
         histCent[2]->Fill(cent, qxC1, 1);//wcorrqxC1); 
@@ -465,17 +517,17 @@ const char* df_name = df->GetName();
         if(in[1]){
           if (iev == 0) std::cout <<  " in 2 is true " << std::endl;
 
-          double corrqxA2 = getCorrection(runnumber, cent, vx, vy, vz, hists2[0])[0];
-          double corrqyA2 = getCorrection(runnumber, cent, vx, vy, vz, hists2[1])[0];
-          double corrqxC2 = getCorrection(runnumber, cent, vx, vy, vz, hists2[2])[0];
-          double corrqyC2 = getCorrection(runnumber, cent, vx, vy, vz, hists2[3])[0];
+          double corrqxA2 = getCorrection(cent, vx, vy, vz, hists2[0])[0];
+          double corrqyA2 = getCorrection(cent, vx, vy, vz, hists2[1])[0];
+          double corrqxC2 = getCorrection(cent, vx, vy, vz, hists2[2])[0];
+          double corrqyC2 = getCorrection(cent, vx, vy, vz, hists2[3])[0];
 
           double qxA2 = qxA1 - corrqxA2; 
           double qyA2 = qyA1 - corrqyA2; 
           double qxC2 = qxC1 - corrqxC2;
           double qyC2 = qyC1 - corrqyC2; 
 
-          if(!in[2]){
+          if(!in[2] && isSelected){
           histVx[0]->Fill(vx, qxA2); 
           histVx[1]->Fill(vx, qyA2); 
           histVx[2]->Fill(vx, qxC2); 
@@ -490,17 +542,17 @@ const char* df_name = df->GetName();
           if(in[2]){
             if (iev == 0) std::cout <<  " in 3 is true " << std::endl;
 
-            double corrqxA3 = getCorrection(runnumber, cent, vx, vy, vz, hists3[0])[0];
-            double corrqyA3 = getCorrection(runnumber, cent, vx, vy, vz, hists3[1])[0];
-            double corrqxC3 = getCorrection(runnumber, cent, vx, vy, vz, hists3[2])[0];
-            double corrqyC3 = getCorrection(runnumber, cent, vx, vy, vz, hists3[3])[0];
+            double corrqxA3 = getCorrection(cent, vx, vy, vz, hists3[0])[0];
+            double corrqyA3 = getCorrection(cent, vx, vy, vz, hists3[1])[0];
+            double corrqxC3 = getCorrection(cent, vx, vy, vz, hists3[2])[0];
+            double corrqyC3 = getCorrection(cent, vx, vy, vz, hists3[3])[0];
 
             double qxA3 = qxA2 - corrqxA3; 
             double qyA3 = qyA2 - corrqyA3; 
             double qxC3 = qxC2 - corrqxC3;
             double qyC3 = qyC2 - corrqyC3; 
 
-          if(!in[3]){  
+          if(!in[3] && isSelected){  
             histVy[0]->Fill(vy, qxA3); 
             histVy[1]->Fill(vy, qyA3); 
             histVy[2]->Fill(vy, qxC3); 
@@ -513,17 +565,17 @@ const char* df_name = df->GetName();
 
             if(in[3]){
               if (iev == 0) std::cout <<  " in 4 is true " << std::endl;
-              double corrqxA4 = getCorrection(runnumber, cent, vx, vy, vz, hists4[0])[0];
-              double corrqyA4 = getCorrection(runnumber, cent, vx, vy, vz, hists4[1])[0];
-              double corrqxC4 = getCorrection(runnumber, cent, vx, vy, vz, hists4[2])[0];
-              double corrqyC4 = getCorrection(runnumber, cent, vx, vy, vz, hists4[3])[0];
+              double corrqxA4 = getCorrection(cent, vx, vy, vz, hists4[0])[0];
+              double corrqyA4 = getCorrection(cent, vx, vy, vz, hists4[1])[0];
+              double corrqxC4 = getCorrection(cent, vx, vy, vz, hists4[2])[0];
+              double corrqyC4 = getCorrection(cent, vx, vy, vz, hists4[3])[0];
 
               double qxA4 = qxA3 - corrqxA4; 
               double qyA4 = qyA3 - corrqyA4; 
               double qxC4 = qxC3 - corrqxC4;
               double qyC4 = qyC3 - corrqyC4; 
 
-             if(!in[4]){ 
+             if(!in[4] && isSelected){ 
               histVz[0]->Fill(vz, qxA4); 
               histVz[1]->Fill(vz, qyA4); 
               histVz[2]->Fill(vz, qxC4); 
@@ -538,20 +590,22 @@ const char* df_name = df->GetName();
               if(in[4]){
                 if (iev == 0) std::cout <<  " in 5 is true " << std::endl;
 
-                double corrqxA5 = getCorrection(runnumber, cent, vx, vy, vz, hists5[0])[0];
-                double corrqyA5 = getCorrection(runnumber, cent, vx, vy, vz, hists5[1])[0];
-                double corrqxC5 = getCorrection(runnumber, cent, vx, vy, vz, hists5[2])[0];
-                double corrqyC5 = getCorrection(runnumber, cent, vx, vy, vz, hists5[3])[0];
+                double corrqxA5 = getCorrection(cent, vx, vy, vz, hists5[0])[0];
+                double corrqyA5 = getCorrection(cent, vx, vy, vz, hists5[1])[0];
+                double corrqxC5 = getCorrection(cent, vx, vy, vz, hists5[2])[0];
+                double corrqyC5 = getCorrection(cent, vx, vy, vz, hists5[3])[0];
 
                 qxA5 = qxA4 - corrqxA5; 
                 qyA5 = qyA4 - corrqyA5; 
                 qxC5 = qxC4 - corrqxC5;
                 qyC5 = qyC4 - corrqyC5; 
 
+                if(isSelected){
                 corrHist[5][0]->Fill(cent, qxA5*qxC5); 
                 corrHist[5][1]->Fill(cent, qxA5*qyC5); 
                 corrHist[5][2]->Fill(cent, qyA5*qxC5); 
                 corrHist[5][3]->Fill(cent, qyA5*qyC5); 
+                }
 
                qxA = qxA5; 
                qyA = qyA5; 
@@ -606,7 +660,7 @@ const char* df_name = df->GetName();
   return 0; 
 }
 
-void recentering(const char* infilename = "/dcache/alice/nkoster/PhD/q-vectors/LHC23zzh_pass4_small/step0/544122/AO2D.root", int run = 544122, int npart=100, int part=0){ 
+void recentering(const char* infilename = "/dcache/alice/nkoster/PhD/q-vectors/LHC23zzh_pass4/544091/AO2D0.root", int run = 544091, int npart=1, int part=0, int finebins=50){ 
 
-  do_recentering(infilename, run, npart, part); 
+  do_recentering(infilename, run, npart, part, finebins); 
 }
